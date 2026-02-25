@@ -15,14 +15,14 @@
       background:#0b1220;
       color:#e5e7eb;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      overflow:hidden; /* body 스크롤 자체 차단 */
+      overflow:hidden; /* body 스크롤 차단 */
     }
 
     .topbar{
       height:52px; display:flex; align-items:center; gap:10px;
       padding:0 12px; border-bottom:1px solid rgba(255,255,255,.08);
       background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0));
-      position:sticky; top:0; z-index:10;
+      position:sticky; top:0; z-index:30;
       user-select:none;
     }
     .btn{
@@ -42,7 +42,7 @@
       overflow:auto; padding:10px; box-sizing:border-box;
     }
 
-    /* 썸네일: ✅ 비율 고정 제거(렌더 후 JS로 실제 비율 적용) */
+    /* 썸네일 */
     .thumb-wrap{
       width:100%;
       margin-bottom:10px;
@@ -60,8 +60,8 @@
       border:none; box-shadow:none; border-radius:0; background:transparent;
     }
     .thumb-wrap.active{
-      border-color: #6366f1;
-      box-shadow: 0 0 0 2px #6366f155;
+      border-color:#6366f1;
+      box-shadow:0 0 0 2px #6366f155;
     }
     .thumb-wrap::before{
       content:""; position:absolute; inset:0;
@@ -89,7 +89,7 @@
       border-radius:12px;
     }
 
-    /* 슬라이드 애니메이션 캔버스 2장 */
+    /* 슬라이드 애니메이션(캔버스 2장) */
     .stage{
       position:relative;
       border-radius:12px;
@@ -110,30 +110,33 @@
       border-radius:0;
       background:transparent;
       transform:translateX(0);
+      pointer-events:none; /* ✅ 캔버스가 클릭 잡아먹지 않게 */
     }
 
-    .canvas-wrap .loading-overlay{
-      position:absolute; inset:0; border-radius:12px;
-      background:rgba(11,18,32,.7);
-      display:flex; align-items:center; justify-content:center;
-      font-size:14px; color:#9ca3af; transition:opacity .2s;
-      z-index:5;
+    /* ✅ 화면을 반으로 나누는 클릭 영역 */
+    .tap-zone{
+      position:absolute; top:0; bottom:0;
+      width:50%;
+      z-index:20;
+      cursor:pointer;
+      -webkit-tap-highlight-color: transparent;
     }
-    .canvas-wrap .loading-overlay.hidden{ opacity:0; pointer-events:none; }
+    .tap-zone.left{ left:0; }
+    .tap-zone.right{ right:0; }
 
-    /* 좌/우 오버레이 네비 버튼 */
+    /* 좌/우 UI 버튼(원하면 숨겨도 됨) */
     .nav-zone{
       position:absolute;
-      top:0;
-      bottom:0;
+      top:0; bottom:0;
       width:72px;
       display:flex;
       align-items:center;
       justify-content:center;
-      z-index:15;
+      z-index:25;
       cursor:pointer;
       user-select:none;
       -webkit-tap-highlight-color: transparent;
+      pointer-events:auto;
     }
     .nav-zone.left{ left:0; }
     .nav-zone.right{ right:0; }
@@ -156,14 +159,24 @@
     .nav-zone:hover .nav-btn{ opacity:1; }
     .nav-zone:active .nav-btn{ transform:scale(.98); }
 
+    .loading-overlay{
+      position:absolute; inset:0; border-radius:12px;
+      background:rgba(11,18,32,.7);
+      display:flex; align-items:center; justify-content:center;
+      font-size:14px; color:#9ca3af;
+      z-index:15;
+    }
+    .loading-overlay.hidden{ display:none; }
+
     .msg{
       position:fixed; left:50%; top:70px; transform:translateX(-50%);
       padding:10px 14px; border-radius:12px; border:1px solid rgba(255,255,255,.12);
-      background:rgba(239,68,68,.15); color:#fecaca; display:none; z-index:20;
+      background:rgba(239,68,68,.15); color:#fecaca; display:none; z-index:50;
       max-width:min(820px, calc(100% - 24px)); white-space:pre-wrap;
     }
   </style>
 </head>
+
 <body>
   <div class="msg" id="msg"></div>
 
@@ -191,11 +204,16 @@
         <div class="nav-btn">›</div>
       </div>
 
-      <div class="canvas-wrap" id="canvasWrap" title="클릭하면 다음 페이지">
+      <div class="canvas-wrap" id="canvasWrap">
         <div class="stage" id="stage">
           <canvas id="canvasA"></canvas>
           <canvas id="canvasB"></canvas>
+
+          <!-- ✅ 스테이지를 좌/우 반으로 분할 클릭 -->
+          <div class="tap-zone left" id="tapLeft" title="이전"></div>
+          <div class="tap-zone right" id="tapRight" title="다음"></div>
         </div>
+
         <div class="loading-overlay" id="overlay">렌더링 중...</div>
       </div>
     </div>
@@ -206,13 +224,13 @@
     const PDF_URL    = "assets/proposal.pdf";
     const WORKER_URL = "vendor/pdf.worker.min.js";
 
-    const $   = (id) => document.getElementById(id);
+    const $ = (id) => document.getElementById(id);
     const msg = $("msg");
     const showMsg = (t) => { msg.textContent = t; msg.style.display = "block"; };
     const hideMsg = () => { msg.style.display = "none"; };
 
     if (!window.pdfjsLib) {
-      showMsg("pdfjsLib is not defined\n\nvendor/pdf.min.js 를 확인하세요.");
+      showMsg("pdfjsLib is not defined\n\nvendor/pdf.min.js 확인 필요");
       throw new Error("pdfjsLib is not defined");
     }
     pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
@@ -221,36 +239,48 @@
     let currentPage = 1;
     let scale       = 1.2;
 
-    // 애니/렌더 상태
     let busy = false;
-    let pending = null;
-    const SLIDE_MS = 180;
+    let pendingTarget = null; // 마지막으로 원하는 페이지(연타해도 마지막만)
+
+    const SLIDE_MS = 190;
 
     const overlay = $("overlay");
     const sidebar = $("sidebar");
     const viewer  = $("viewer");
-    const canvasWrap = $("canvasWrap");
-    const stage = $("stage");
+    const stage   = $("stage");
 
     const canvasA = $("canvasA");
     const canvasB = $("canvasB");
-    const ctxA = canvasA.getContext("2d", { alpha: false });
-    const ctxB = canvasB.getContext("2d", { alpha: false });
-    let front = "A";
+    const ctxA = canvasA.getContext("2d", { alpha:false });
+    const ctxB = canvasB.getContext("2d", { alpha:false });
 
-    const frontCanvas = () => front === "A" ? canvasA : canvasB;
-    const backCanvas  = () => front === "A" ? canvasB : canvasA;
-    const frontCtx    = () => front === "A" ? ctxA : ctxB;
-    const backCtx     = () => front === "A" ? ctxB : ctxA;
+    let front = "A"; // 처음엔 A가 front
 
-    // 썸네일 lazy (✅ 더 가볍게)
+    const frontCanvas = () => (front === "A" ? canvasA : canvasB);
+    const backCanvas  = () => (front === "A" ? canvasB : canvasA);
+    const frontCtx    = () => (front === "A" ? ctxA : ctxB);
+    const backCtx     = () => (front === "A" ? ctxB : ctxA);
+
+    // 썸네일 lazy
     const thumbCache = new Map();
     let thumbObserver = null;
-    const THUMB_TARGET_W = 160; // 190 → 160 (더 빨라짐)
+    const THUMB_TARGET_W = 160;
 
     function clampPage(n){
       if (!pdfDoc) return 1;
       return Math.max(1, Math.min(pdfDoc.numPages, n));
+    }
+
+    function setLayersIdle(){
+      // ✅ 빈 캔버스가 위에 덮지 않도록 z-index 관리 + back는 화면 밖으로 빼기
+      const f = frontCanvas();
+      const b = backCanvas();
+      f.style.zIndex = 2;
+      b.style.zIndex = 1;
+      f.style.transform = "translateX(0)";
+      b.style.transform = "translateX(120%)"; // 화면 밖
+      f.style.transition = "none";
+      b.style.transition = "none";
     }
 
     function setNavUI() {
@@ -277,19 +307,24 @@
       stage.style.height = h + "px";
 
       await page.render({ canvasContext: targetCtx, viewport }).promise;
-      return { w, h };
     }
 
-    function animateSlide(dir) {
+    function animateSlide(direction){
       return new Promise((resolve) => {
-        const inFrom = (dir === "next") ? 1 : -1;
+        // next: 오른쪽에서 들어오고, prev: 왼쪽에서 들어옴
+        const inFrom = (direction === "next") ? 1 : -1;
         const outTo  = -inFrom;
 
         const f = frontCanvas();
         const b = backCanvas();
 
+        // ✅ 애니중에는 incoming(back)을 위로
+        f.style.zIndex = 2;
+        b.style.zIndex = 3;
+
         f.style.transition = "none";
         b.style.transition = "none";
+
         f.style.transform = "translateX(0)";
         b.style.transform = `translateX(${inFrom * 100}%)`;
 
@@ -302,38 +337,41 @@
           });
         });
 
-        setTimeout(() => {
-          f.style.transition = "none";
-          b.style.transition = "none";
-          f.style.transform = "translateX(0)";
-          b.style.transform = "translateX(0)";
-          resolve();
-        }, SLIDE_MS + 20);
+        setTimeout(() => resolve(), SLIDE_MS + 30);
       });
     }
 
-    async function renderPage(pageNum, dir = null) {
+    async function renderPage(targetPage) {
       if (!pdfDoc) return;
 
-      pageNum = clampPage(pageNum);
-      if (pageNum === currentPage) return;
+      targetPage = clampPage(targetPage);
+      if (targetPage === currentPage) return;
 
-      if (busy) { pending = { page: pageNum, dir }; return; }
+      if (busy) {
+        pendingTarget = targetPage; // 연타 시 마지막 목표만 저장
+        return;
+      }
+
       busy = true;
       overlay.classList.remove("hidden");
 
       try {
-        const direction = dir || (pageNum > currentPage ? "next" : "prev");
+        const direction = (targetPage > currentPage) ? "next" : "prev";
 
-        await renderTo(pageNum, backCanvas(), backCtx());
+        // back에 미리 렌더
+        await renderTo(targetPage, backCanvas(), backCtx());
 
+        // 오버레이 숨기고 슬라이드
         overlay.classList.add("hidden");
         await animateSlide(direction);
 
+        // swap
         front = (front === "A") ? "B" : "A";
-        currentPage = pageNum;
+        currentPage = targetPage;
 
+        setLayersIdle();
         setNavUI();
+
         viewer.scrollTop = 0;
 
       } catch (e) {
@@ -344,16 +382,18 @@
         overlay.classList.add("hidden");
         busy = false;
 
-        if (pending) {
-          const nextJob = pending;
-          pending = null;
-          renderPage(nextJob.page, nextJob.dir);
+        if (pendingTarget !== null && pendingTarget !== currentPage) {
+          const next = pendingTarget;
+          pendingTarget = null;
+          renderPage(next);
+        } else {
+          pendingTarget = null;
         }
       }
     }
 
-    function goNext(){ if (pdfDoc) renderPage(currentPage + 1, "next"); }
-    function goPrev(){ if (pdfDoc) renderPage(currentPage - 1, "prev"); }
+    function goNext(){ if (pdfDoc) renderPage(currentPage + 1); }
+    function goPrev(){ if (pdfDoc) renderPage(currentPage - 1); }
 
     async function renderThumb(wrap, pageNum) {
       if (thumbCache.has(pageNum)) return;
@@ -371,9 +411,7 @@
 
       await page.render({ canvasContext: c.getContext("2d", { alpha:false }), viewport: tv }).promise;
 
-      // ✅ 썸네일 박스 비율을 실제 캔버스 비율로 맞춰서 찌그러짐 제거
       wrap.style.aspectRatio = `${c.width} / ${c.height}`;
-
       wrap.appendChild(c);
       wrap.classList.add("loaded");
     }
@@ -390,7 +428,6 @@
           const wrap = entry.target;
           const pageNum = parseInt(wrap.dataset.page, 10);
 
-          // ✅ 메인 렌더 방해 줄이려고 idle에 올림
           const run = () => renderThumb(wrap, pageNum);
           if ("requestIdleCallback" in window) requestIdleCallback(run, { timeout: 1200 });
           else setTimeout(run, 0);
@@ -412,26 +449,27 @@
 
     async function loadPdf() {
       try {
-        // ✅ 초기 로딩 더 빠르게: 첫 페이지 우선 → 썸네일은 뒤로
         pdfDoc = await pdfjsLib.getDocument({
           url: PDF_URL,
           rangeChunkSize: 65536,
           disableAutoFetch: false,
           disableStream: false,
-          // ✅ 브라우저에 따라 도움되는 옵션(안 맞으면 자동 무시)
-          // cMapUrl / standardFontDataUrl 같은 건 필요할 때만
         }).promise;
 
         $("pageCount").textContent = `/ ${pdfDoc.numPages}`;
 
         overlay.classList.remove("hidden");
-        await renderTo(1, frontCanvas(), frontCtx());
-        overlay.classList.add("hidden");
 
+        // ✅ 첫 페이지를 front에 렌더
+        await renderTo(1, frontCanvas(), frontCtx());
         currentPage = 1;
+
+        // ✅ back 캔버스가 위에 덮지 않도록 즉시 정리
+        setLayersIdle();
+
+        overlay.classList.add("hidden");
         setNavUI();
 
-        // ✅ 첫 화면 뜬 뒤에 썸네일 생성(체감 속도 개선)
         setTimeout(buildThumbPlaceholders, 0);
 
       } catch (e) {
@@ -446,41 +484,49 @@
     }
 
     // 상단 버튼
-    $("prev").addEventListener("click", goPrev);
-    $("next").addEventListener("click", goNext);
+    $("prev").addEventListener("click", (e) => { e.stopPropagation(); goPrev(); });
+    $("next").addEventListener("click", (e) => { e.stopPropagation(); goNext(); });
 
-    $("zoomIn").addEventListener("click", async () => {
+    $("zoomIn").addEventListener("click", async (e) => {
+      e.stopPropagation();
       if (!pdfDoc || busy) return;
       scale = Math.min(3.0, scale + 0.15);
       overlay.classList.remove("hidden");
       await renderTo(currentPage, frontCanvas(), frontCtx());
+      setLayersIdle();
       overlay.classList.add("hidden");
     });
 
-    $("zoomOut").addEventListener("click", async () => {
+    $("zoomOut").addEventListener("click", async (e) => {
+      e.stopPropagation();
       if (!pdfDoc || busy) return;
       scale = Math.max(0.6, scale - 0.15);
       overlay.classList.remove("hidden");
       await renderTo(currentPage, frontCanvas(), frontCtx());
+      setLayersIdle();
       overlay.classList.add("hidden");
     });
 
-    $("page").addEventListener("keydown", async (e) => {
+    $("page").addEventListener("keydown", (e) => {
       if (e.key !== "Enter" || !pdfDoc) return;
       const n = parseInt(e.target.value, 10);
       if (Number.isFinite(n)) renderPage(clampPage(n));
     });
 
-    $("openPdf").addEventListener("click", () => window.open(PDF_URL, "_blank"));
+    $("openPdf").addEventListener("click", (e) => {
+      e.stopPropagation();
+      window.open(PDF_URL, "_blank");
+    });
 
-    // 좌/우 오버레이 버튼
-    $("navLeft").addEventListener("click", (e) => { e.stopPropagation(); goPrev(); });
-    $("navRight").addEventListener("click", (e) => { e.stopPropagation(); goNext(); });
+    // 좌/우 UI 버튼
+    $("navLeft").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); goPrev(); });
+    $("navRight").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); goNext(); });
 
-    // 메인 화면 클릭 → 다음 페이지
-    canvasWrap.addEventListener("click", () => goNext());
+    // ✅ 스테이지 좌/우 반 클릭(빈 화면 포함 전체 영역)
+    $("tapLeft").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); goPrev(); });
+    $("tapRight").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); goNext(); });
 
-    // ✅ Space / Arrow키 완전 페이지 이동 + 스크롤 방지
+    // ✅ 키보드 컨트롤(스크롤 완전 방지)
     document.addEventListener("keydown", (e) => {
       if (!pdfDoc) return;
 
