@@ -4,39 +4,23 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PDF Viewer</title>
-
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf_viewer.min.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf_viewer.min.js"></script>
-
   <style>
     html,body{height:100%;margin:0;background:#0b0f1a;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans KR",Arial,sans-serif}
     .bar{height:56px;display:flex;gap:10px;align-items:center;padding:10px 12px;background:#111827;border-bottom:1px solid #223046;position:sticky;top:0;z-index:10}
     .btn{height:36px;padding:0 10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#e5e7eb;cursor:pointer}
     .btn:disabled{opacity:.45;cursor:not-allowed}
-    .inp{height:36px;padding:0 10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#e5e7eb;outline:none;width:240px}
     .mini{height:36px;width:76px;text-align:center;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#e5e7eb;outline:none}
     .label{color:#9ca3af;font-size:12px}
     .spacer{flex:1}
-    #viewerContainer{height:calc(100vh - 56px);overflow:auto;padding:18px 0}
-    .pdfViewer .page{margin:0 auto 14px auto;border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.35)}
-    .errorBox{
-      max-width:900px;margin:18px auto;padding:14px 16px;border-radius:12px;
-      border:1px solid rgba(239,68,68,.5); background:rgba(239,68,68,.12); color:#fecaca;
-      display:none; white-space:pre-wrap; line-height:1.4;
-    }
-    .okBox{
-      max-width:900px;margin:18px auto;padding:14px 16px;border-radius:12px;
-      border:1px solid rgba(34,197,94,.5); background:rgba(34,197,94,.12); color:#bbf7d0;
-      display:none; white-space:pre-wrap; line-height:1.4;
-    }
+    #wrap{height:calc(100vh - 56px);overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:18px}
+    #canvas{max-width:100%;border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.35);background:#111}
+    .err{max-width:900px;margin:12px auto;padding:12px 14px;border-radius:12px;border:1px solid rgba(239,68,68,.5);background:rgba(239,68,68,.12);color:#fecaca;white-space:pre-wrap;display:none}
   </style>
 </head>
-
 <body>
   <div class="bar">
     <button class="btn" id="prevBtn">◀</button>
-    <input class="mini" id="pageNumber" value="1" inputmode="numeric" />
+    <input class="mini" id="pageInput" value="1" inputmode="numeric" />
     <span class="label">/ <span id="pageCount">-</span></span>
     <button class="btn" id="nextBtn">▶</button>
 
@@ -46,119 +30,108 @@
     <button class="btn" id="openPdfBtn">PDF 직접열기</button>
   </div>
 
-  <div id="okBox" class="okBox"></div>
-  <div id="errorBox" class="errorBox"></div>
+  <div id="err" class="err"></div>
 
-  <div id="viewerContainer">
-    <div id="viewer" class="pdfViewer"></div>
+  <div id="wrap">
+    <canvas id="canvas"></canvas>
   </div>
 
+  <!-- ✅ 로컬 pdf.js (CDN 차단 이슈 제거) -->
+  <script src="vendor/pdf.min.js"></script>
   <script>
-    // ✅ 여기만 네 상황에 맞게 수정
-    // (추천) 파일명을 proposal.pdf로 바꾸고 assets/proposal.pdf로 두기
     const PDF_URL = "assets/proposal.pdf";
-    // 파일명을 그대로 썼다면 예시:
-    // const PDF_URL = "assets/(커리어디자인)제안서_외국인%20유학생%20프로그램%20사업%20운영.pdf";
 
     const statusEl = document.getElementById("status");
-    const errorBox = document.getElementById("errorBox");
-    const okBox = document.getElementById("okBox");
-    const viewerContainer = document.getElementById("viewerContainer");
-    const viewerEl = document.getElementById("viewer");
+    const errEl = document.getElementById("err");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
 
     const prevBtn = document.getElementById("prevBtn");
     const nextBtn = document.getElementById("nextBtn");
-    const pageNumber = document.getElementById("pageNumber");
-    const pageCount = document.getElementById("pageCount");
+    const pageInput = document.getElementById("pageInput");
+    const pageCountEl = document.getElementById("pageCount");
     const openPdfBtn = document.getElementById("openPdfBtn");
 
-    function showError(msg){
-      errorBox.style.display = "block";
-      errorBox.textContent = msg;
-    }
-    function showOk(msg){
-      okBox.style.display = "block";
-      okBox.textContent = msg;
+    openPdfBtn.onclick = () => window.open(PDF_URL, "_blank", "noopener,noreferrer");
+
+    function showErr(e){
+      errEl.style.display = "block";
+      errEl.textContent = String(e && e.message ? e.message : e);
+      statusEl.textContent = "로딩 실패";
     }
 
-    openPdfBtn.addEventListener("click", () => window.open(PDF_URL, "_blank", "noopener,noreferrer"));
-
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js";
+    // worker 경로도 로컬로 고정
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+    } else {
+      showErr("pdf.min.js 로드 실패 (vendor/pdf.min.js 확인)");
+    }
 
     let pdfDoc = null;
-    let pdfViewer = null;
-    let linkService = null;
+    let pageNum = 1;
+    let rendering = false;
 
-    async function assertPdfReachable() {
-      // 먼저 PDF가 실제로 존재(200)하는지 확인 → 404면 여기서 바로 잡힘
-      const r = await fetch(PDF_URL, { method: "GET" });
-      if (!r.ok) {
-        throw new Error(
-          `PDF 접근 실패: ${r.status} ${r.statusText}\n` +
-          `요청한 경로: ${location.origin + location.pathname.replace(/\\/[^\\/]*$/, "/") + PDF_URL}\n\n` +
-          `✅ 확인할 것:\n` +
-          `- assets 폴더명 정확한지\n` +
-          `- 파일명이 proposal.pdf인지(대소문자 포함)\n` +
-          `- 한글/공백 파일명인 경우 %20 인코딩 했는지`
-        );
-      }
-      return true;
-    }
+    async function renderPage(num){
+      if (!pdfDoc) return;
+      rendering = true;
+      statusEl.textContent = "렌더링 중…";
 
-    async function init() {
-      statusEl.textContent = "PDF 확인 중…";
-      await assertPdfReachable();
-      showOk("PDF 파일 접근 OK → 렌더링 시작");
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale: 1.6 });
 
-      statusEl.textContent = "PDF 로딩 중…";
-      linkService = new pdfjsViewer.PDFLinkService();
-      pdfViewer = new pdfjsViewer.PDFViewer({
-        container: viewerContainer,
-        viewer: viewerEl,
-        linkService,
-        textLayerMode: 2
-      });
-      linkService.setViewer(pdfViewer);
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
 
-      const loadingTask = pdfjsLib.getDocument({
-        url: PDF_URL,
-        cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/cmaps/",
-        cMapPacked: true
-      });
+      const renderTask = page.render({ canvasContext: ctx, viewport });
+      await renderTask.promise;
 
-      pdfDoc = await loadingTask.promise;
-      pdfViewer.setDocument(pdfDoc);
-      linkService.setDocument(pdfDoc);
+      pageInput.value = String(num);
+      pageCountEl.textContent = String(pdfDoc.numPages);
+      prevBtn.disabled = num <= 1;
+      nextBtn.disabled = num >= pdfDoc.numPages;
 
-      pageCount.textContent = String(pdfDoc.numPages);
       statusEl.textContent = "완료";
-
-      const updateNav = () => {
-        const p = pdfViewer.currentPageNumber || 1;
-        pageNumber.value = String(p);
-        prevBtn.disabled = p <= 1;
-        nextBtn.disabled = p >= pdfDoc.numPages;
-      };
-
-      prevBtn.addEventListener("click", () => { pdfViewer.currentPageNumber -= 1; updateNav(); });
-      nextBtn.addEventListener("click", () => { pdfViewer.currentPageNumber += 1; updateNav(); });
-      pageNumber.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          const n = parseInt(pageNumber.value, 10);
-          if (Number.isFinite(n)) pdfViewer.currentPageNumber = Math.min(Math.max(1, n), pdfDoc.numPages);
-          updateNav();
-        }
-      });
-
-      updateNav();
+      rendering = false;
     }
 
-    init().catch(err => {
-      console.error(err);
-      statusEl.textContent = "로딩 실패";
-      showError(String(err && err.message ? err.message : err));
-    });
+    async function init(){
+      try{
+        statusEl.textContent = "PDF 확인 중…";
+        const r = await fetch(PDF_URL);
+        if (!r.ok) throw new Error(`PDF 접근 실패: ${r.status} ${r.statusText}\n경로: ${PDF_URL}`);
+        statusEl.textContent = "PDF 로딩 중…";
+
+        const loadingTask = pdfjsLib.getDocument({ url: PDF_URL });
+        pdfDoc = await loadingTask.promise;
+
+        pageCountEl.textContent = String(pdfDoc.numPages);
+        await renderPage(pageNum);
+
+        prevBtn.onclick = async () => {
+          if (rendering || pageNum <= 1) return;
+          pageNum--;
+          await renderPage(pageNum);
+        };
+        nextBtn.onclick = async () => {
+          if (rendering || pageNum >= pdfDoc.numPages) return;
+          pageNum++;
+          await renderPage(pageNum);
+        };
+        pageInput.addEventListener("keydown", async (e) => {
+          if (e.key !== "Enter") return;
+          const n = parseInt(pageInput.value, 10);
+          if (!Number.isFinite(n)) return;
+          pageNum = Math.min(Math.max(1, n), pdfDoc.numPages);
+          await renderPage(pageNum);
+        });
+
+      } catch(e){
+        console.error(e);
+        showErr(e);
+      }
+    }
+
+    init();
   </script>
 </body>
 </html>
