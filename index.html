@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF Viewer</title>
+
+  <!-- PDF.js (CDN) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf_viewer.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf_viewer.min.js"></script>
+
+  <style>
+    :root { --bar-h: 56px; --bg: #0b0f1a; --panel: #111827; --panel2:#0f172a; --line:#223046; --txt:#e5e7eb; --muted:#9ca3af; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--txt); font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", Arial, sans-serif; }
+    .app { height: 100%; display: grid; grid-template-rows: var(--bar-h) 1fr; }
+    .bar {
+      display:flex; gap:10px; align-items:center; padding: 10px 12px;
+      background: linear-gradient(180deg, rgba(17,24,39,.95), rgba(15,23,42,.95));
+      border-bottom: 1px solid var(--line);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .bar .group { display:flex; gap:8px; align-items:center; }
+    .bar .spacer { flex:1; }
+    .btn {
+      height: 36px; padding: 0 10px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.06);
+      color: var(--txt); cursor: pointer;
+      display:inline-flex; align-items:center; gap:6px;
+      user-select:none;
+    }
+    .btn:hover { background: rgba(255,255,255,.10); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .inp {
+      height: 36px; padding: 0 10px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04);
+      color: var(--txt);
+      outline: none;
+      width: 220px;
+    }
+    .inp::placeholder { color: rgba(229,231,235,.45); }
+    .mini {
+      height: 36px; width: 76px; text-align:center;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04); color: var(--txt);
+      outline:none;
+    }
+    .label { color: var(--muted); font-size: 12px; }
+    .status { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .main { display:grid; grid-template-columns: 320px 1fr; min-height: 0; }
+    .side {
+      border-right: 1px solid var(--line);
+      background: rgba(17,24,39,.55);
+      display:flex; flex-direction:column; min-height:0;
+    }
+    .sideHeader {
+      padding: 12px; border-bottom: 1px solid rgba(255,255,255,.08);
+      display:flex; gap:8px; align-items:center;
+    }
+    .thumbs { overflow:auto; padding: 10px; min-height:0; }
+    .thumb {
+      display:flex; gap:10px; padding: 8px; border-radius: 12px;
+      cursor: pointer; border: 1px solid transparent;
+    }
+    .thumb:hover { background: rgba(255,255,255,.05); }
+    .thumb.active { border-color: rgba(59,130,246,.55); background: rgba(59,130,246,.12); }
+    .thumb canvas { width: 84px; height: auto; border-radius: 8px; background: rgba(255,255,255,.04); }
+    .thumb .meta { display:flex; flex-direction:column; gap:6px; }
+    .thumb .meta .t { font-size: 13px; color: var(--txt); }
+    .thumb .meta .p { font-size: 12px; color: var(--muted); }
+    .viewerWrap { position:relative; min-height:0; overflow:hidden; background: rgba(3,7,18,.35); }
+    #viewerContainer { position:absolute; inset: 0; overflow:auto; padding: 18px 0; }
+    /* PDF.js viewer defaults use .pdfViewer */
+    .pdfViewer .page { margin: 0 auto 14px auto; border-radius: 12px; box-shadow: 0 10px 26px rgba(0,0,0,.35); }
+    .toast {
+      position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+      background: rgba(17,24,39,.92);
+      border: 1px solid rgba(255,255,255,.10);
+      padding: 10px 12px; border-radius: 12px;
+      font-size: 13px; color: var(--txt);
+      display:none; z-index: 9999;
+    }
+    @media (max-width: 980px) {
+      .main { grid-template-columns: 1fr; }
+      .side { display:none; }
+      .inp { width: 160px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <div class="bar">
+      <div class="group">
+        <button class="btn" id="prevBtn" title="이전 페이지">◀</button>
+        <input class="mini" id="pageNumber" value="1" inputmode="numeric" />
+        <span class="label">/ <span id="pageCount">-</span></span>
+        <button class="btn" id="nextBtn" title="다음 페이지">▶</button>
+      </div>
+
+      <div class="group">
+        <button class="btn" id="zoomOutBtn" title="축소">－</button>
+        <button class="btn" id="zoomInBtn" title="확대">＋</button>
+        <button class="btn" id="fitWidthBtn" title="가로 맞춤">가로맞춤</button>
+      </div>
+
+      <div class="group">
+        <input class="inp" id="searchInput" placeholder="검색어 입력 (Enter)" />
+        <button class="btn" id="searchPrevBtn" title="이전 결과">↑</button>
+        <button class="btn" id="searchNextBtn" title="다음 결과">↓</button>
+        <span class="status" id="searchStatus"></span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="group">
+        <button class="btn" id="downloadBtn" title="PDF 다운로드">다운로드</button>
+        <button class="btn" id="openNewTabBtn" title="새 탭에서 열기">새 탭</button>
+      </div>
+
+      <div class="status" id="status">로딩 준비…</div>
+    </div>
+
+    <div class="main">
+      <aside class="side">
+        <div class="sideHeader">
+          <div class="label">썸네일</div>
+          <div class="spacer"></div>
+          <div class="label" id="thumbStatus"></div>
+        </div>
+        <div class="thumbs" id="thumbs"></div>
+      </aside>
+
+      <main class="viewerWrap">
+        <div id="viewerContainer">
+          <div id="viewer" class="pdfViewer"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ✅ 여기만 바꾸면 됩니다.
+    // (추천) 파일명을 짧게 바꿔서 assets/proposal.pdf 로 두세요.
+    const PDF_URL = "assets/proposal.pdf";
+
+    // (파일명을 그대로 쓰는 경우 예시)
+    // const PDF_URL = "assets/(커리어디자인)제안서_외국인%20유학생%20프로그램%20사업%20운영.pdf";
+
+    // PDF.js worker 설정
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js";
+
+    const els = {
+      status: document.getElementById("status"),
+      viewerContainer: document.getElementById("viewerContainer"),
+      viewer: document.getElementById("viewer"),
+      pageNumber: document.getElementById("pageNumber"),
+      pageCount: document.getElementById("pageCount"),
+      prevBtn: document.getElementById("prevBtn"),
+      nextBtn: document.getElementById("nextBtn"),
+      zoomInBtn: document.getElementById("zoomInBtn"),
+      zoomOutBtn: document.getElementById("zoomOutBtn"),
+      fitWidthBtn: document.getElementById("fitWidthBtn"),
+      downloadBtn: document.getElementById("downloadBtn"),
+      openNewTabBtn: document.getElementById("openNewTabBtn"),
+      searchInput: document.getElementById("searchInput"),
+      searchPrevBtn: document.getElementById("searchPrevBtn"),
+      searchNextBtn: document.getElementById("searchNextBtn"),
+      searchStatus: document.getElementById("searchStatus"),
+      thumbs: document.getElementById("thumbs"),
+      thumbStatus: document.getElementById("thumbStatus"),
+      toast: document.getElementById("toast")
+    };
+
+    const toast = (msg) => {
+      els.toast.textContent = msg;
+      els.toast.style.display = "block";
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => (els.toast.style.display = "none"), 1800);
+    };
+
+    let pdfDoc = null;
+    let pdfViewer = null;
+    let pdfLinkService = null;
+    let findController = null;
+    let currentScale = 1.1;
+
+    const isLikelyTextSearchable = () => {
+      // PDF.js 검색은 텍스트 레이어가 있어야 잘 됩니다.
+      // 스캔 PDF면 검색 결과가 거의 없을 수 있어요.
+      return true;
+    };
+
+    function setNavButtons(pageNum, numPages) {
+      els.pageNumber.value = String(pageNum);
+      els.pageCount.textContent = String(numPages);
+      els.prevBtn.disabled = pageNum <= 1;
+      els.nextBtn.disabled = pageNum >= numPages;
+    }
+
+    function gotoPage(n) {
+      if (!pdfViewer || !pdfDoc) return;
+      const numPages = pdfDoc.numPages;
+      const page = Math.min(Math.max(1, n), numPages);
+      pdfViewer.currentPageNumber = page;
+      setNavButtons(pdfViewer.currentPageNumber, numPages);
+      // 활성 썸네일 하이라이트
+      const active = els.thumbs.querySelector(".thumb.active");
+      if (active) active.classList.remove("active");
+      const next = els.thumbs.querySelector(`.thumb[data-page="${page}"]`);
+      if (next) next.classList.add("active");
+    }
+
+    function zoomTo(scale) {
+      if (!pdfViewer) return;
+      currentScale = Math.min(Math.max(0.5, scale), 3.0);
+      pdfViewer.currentScale = currentScale;
+      toast(`확대/축소: ${(currentScale * 100).toFixed(0)}%`);
+    }
+
+    function fitWidth() {
+      if (!pdfViewer) return;
+      pdfViewer.currentScaleValue = "page-width";
+      toast("가로 맞춤");
+    }
+
+    async function renderThumbs(limit = 60) {
+      // 썸네일: 너무 많은 페이지면 느려질 수 있어서 limit 적용
+      if (!pdfDoc) return;
+      const numPages = pdfDoc.numPages;
+      const count = Math.min(numPages, limit);
+      els.thumbStatus.textContent = `${count}/${numPages}`;
+
+      for (let i = 1; i <= count; i++) {
+        const page = await pdfDoc.getPage(i);
+        const viewport = page.getViewport({ scale: 0.18 }); // 썸네일용
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d", { alpha: false });
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        const item = document.createElement("div");
+        item.className = "thumb" + (i === 1 ? " active" : "");
+        item.dataset.page = String(i);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const t = document.createElement("div");
+        t.className = "t";
+        t.textContent = `Page ${i}`;
+        const p = document.createElement("div");
+        p.className = "p";
+        p.textContent = "클릭하여 이동";
+        meta.appendChild(t);
+        meta.appendChild(p);
+
+        item.appendChild(canvas);
+        item.appendChild(meta);
+
+        item.addEventListener("click", () => gotoPage(i));
+        els.thumbs.appendChild(item);
+      }
+
+      if (numPages > limit) {
+        const more = document.createElement("div");
+        more.className = "label";
+        more.style.padding = "10px 8px";
+        more.textContent = `※ 썸네일은 성능상 ${limit}페이지까지만 표시합니다.`;
+        els.thumbs.appendChild(more);
+      }
+    }
+
+    async function init() {
+      els.status.textContent = "PDF 불러오는 중…";
+
+      pdfLinkService = new pdfjsViewer.PDFLinkService();
+
+      findController = new pdfjsViewer.PDFFindController({
+        linkService: pdfLinkService
+      });
+
+      pdfViewer = new pdfjsViewer.PDFViewer({
+        container: els.viewerContainer,
+        viewer: els.viewer,
+        linkService: pdfLinkService,
+        findController,
+        textLayerMode: 2 // 텍스트 레이어
+      });
+
+      pdfLinkService.setViewer(pdfViewer);
+
+      const loadingTask = pdfjsLib.getDocument({
+        url: PDF_URL,
+        cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/cmaps/",
+        cMapPacked: true
+      });
+
+      pdfDoc = await loadingTask.promise;
+
+      pdfViewer.setDocument(pdfDoc);
+      pdfLinkService.setDocument(pdfDoc, null);
+
+      els.status.textContent = "렌더링 중…";
+
+      // 첫 렌더 완료 후 상태 업데이트
+      pdfViewer.eventBus?.on?.("pagesinit", () => {
+        // 일부 버전에서는 내부 eventBus 접근이 다를 수 있어, 안전하게 처리
+      });
+
+      // PDFViewer는 pagesinit 이벤트를 viewer의 eventBus로 제공하지만,
+      // CDN 조합에 따라 접근이 제한될 수 있어 간단히 delay로 처리
+      setTimeout(() => {
+        setNavButtons(1, pdfDoc.numPages);
+        zoomTo(currentScale);
+        els.status.textContent = "완료";
+      }, 200);
+
+      // 썸네일 생성
+      renderThumbs(60).catch(() => {
+        els.thumbStatus.textContent = "";
+      });
+    }
+
+    // ---------- UI events ----------
+    els.prevBtn.addEventListener("click", () => gotoPage((pdfViewer?.currentPageNumber || 1) - 1));
+    els.nextBtn.addEventListener("click", () => gotoPage((pdfViewer?.currentPageNumber || 1) + 1));
+
+    els.pageNumber.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const n = parseInt(els.pageNumber.value, 10);
+        if (Number.isFinite(n)) gotoPage(n);
+      }
+    });
+
+    els.zoomInBtn.addEventListener("click", () => zoomTo(currentScale + 0.1));
+    els.zoomOutBtn.addEventListener("click", () => zoomTo(currentScale - 0.1));
+    els.fitWidthBtn.addEventListener("click", () => fitWidth());
+
+    els.downloadBtn.addEventListener("click", () => {
+      const a = document.createElement("a");
+      a.href = PDF_URL;
+      a.download = PDF_URL.split("/").pop();
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+
+    els.openNewTabBtn.addEventListener("click", () => {
+      window.open(PDF_URL, "_blank", "noopener,noreferrer");
+    });
+
+    function runSearch(findPrevious = false) {
+      const q = els.searchInput.value.trim();
+      if (!q) return;
+
+      // PDF.js findController 사용
+      try {
+        findController.executeCommand("find", {
+          query: q,
+          phraseSearch: true,
+          highlightAll: true,
+          findPrevious
+        });
+        els.searchStatus.textContent = "검색 중…";
+        toast(`검색: ${q}`);
+      } catch (err) {
+        els.searchStatus.textContent = "검색 불가";
+        toast("검색 실행 중 오류");
+      }
+    }
+
+    els.searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") runSearch(false);
+    });
+    els.searchNextBtn.addEventListener("click", () => runSearch(false));
+    els.searchPrevBtn.addEventListener("click", () => runSearch(true));
+
+    // FindController 상태 표시(가능한 경우)
+    // (일부 CDN 조합에서는 이벤트가 제한될 수 있어, best-effort)
+    const hookFindUpdates = () => {
+      if (!findController) return;
+      const orig = findController.onUpdateResultsCount;
+      findController.onUpdateResultsCount = function (matchCount) {
+        try {
+          els.searchStatus.textContent = matchCount?.total
+            ? `${matchCount.total}개`
+            : "0개";
+        } catch {}
+        if (orig) orig.call(findController, matchCount);
+      };
+      const orig2 = findController.onUpdateState;
+      findController.onUpdateState = function (state, previous, matchesCount) {
+        // state: 0=FOUND, 1=NOT_FOUND, 2=WRAPPED, 3=PENDING
+        if (state === 1) els.searchStatus.textContent = "없음";
+        if (state === 3) els.searchStatus.textContent = "검색 중…";
+        if (state === 2) els.searchStatus.textContent = "끝→처음";
+        if (state === 0 && matchesCount?.total != null) els.searchStatus.textContent = `${matchesCount.total}개`;
+        if (orig2) orig2.call(findController, state, previous, matchesCount);
+      };
+    };
+
+    // init
+    init()
+      .then(() => {
+        hookFindUpdates();
+        if (!isLikelyTextSearchable()) {
+          toast("이 PDF는 텍스트 검색이 제한될 수 있어요(스캔 PDF일 수 있음).");
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        els.status.textContent = "로딩 실패";
+        toast("PDF 로딩 실패: 경로/파일명을 확인하세요.");
+      });
+  </script>
+</body>
+</html>
